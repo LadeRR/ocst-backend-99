@@ -35,8 +35,8 @@ let chatMessages = [];
 
 // Discord Webhook URLs
 const DISCORD_WEBHOOKS = {
-  chat: 'YOUR_CHAT_WEBHOOK_URL',
-  pager: 'YOUR_PAGER_WEBHOOK_URL'
+  chat: 'https://discord.com/api/webhooks/1466676305050472615/vZTS9bnlMeCYTABz5p0Cnwlv0yvP_qcDdhspbdNowdrSJmCifSaT1BJ7lLmWTH_ob-72',
+  pager: 'https://discord.com/api/webhooks/1466651197363454072/LbukP7UrHVqusJLzx7f7s1PMatzpB2L20h5LNT41NeUtLCRe9OMNc9rPlhh9_rrO_34S'
 };
 
 //
@@ -221,3 +221,4 @@ const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
   console.log(`OCST Dispatch Backend çalışıyor: ${PORT}`);
 });
+
