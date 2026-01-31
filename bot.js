@@ -71,7 +71,7 @@ app.listen(PORT, () => {
   console.log(`Discord bot API çalışıyor: ${PORT}`);
 });
 
-client.login(DISCORD_BOT_TOKEN);
+client.login(DISCORD_BOT_TOKEN); process.env.DISCORD_BOT_TOKEN;
 
 // Hata yakalama
 client.on('error', (error) => {
@@ -81,3 +81,4 @@ client.on('error', (error) => {
 process.on('unhandledRejection', (error) => {
   console.error('Unhandled rejection:', error);
 });
+
