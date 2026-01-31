@@ -33,39 +33,61 @@ let callIdCounter = 1;
 // Chat mesajları (geçici)
 let chatMessages = [];
 
-// Discord Webhook URLs (Bunları kendi webhook URL'lerinizle değiştirin)
+// Discord Webhook URLs
 const DISCORD_WEBHOOKS = {
-  chat: 'https://discord.com/api/webhooks/1466676305050472615/vZTS9bnlMeCYTABz5p0Cnwlv0yvP_qcDdhspbdNowdrSJmCifSaT1BJ7lLmWTH_ob-72', // Chat log kanalı
-  pager: 'https://discord.com/api/webhooks/1466651197363454072/LbukP7UrHVqusJLzx7f7s1PMatzpB2L20h5LNT41NeUtLCRe9OMNc9rPlhh9_rrO_34S' // Pager kanalı
+  chat: 'YOUR_CHAT_WEBHOOK_URL',
+  pager: 'YOUR_PAGER_WEBHOOK_URL'
 };
 
-// Discord'a mesaj gönderme fonksiyonu
+//
+// 🔒 DISCORD RATE-LIMIT QUEUE (YENİ)
+//
+const discordQueue = [];
+let discordSending = false;
+
+// Discord'a mesaj gönderme (QUEUE + DELAY)
 async function sendToDiscord(webhookUrl, content) {
-  try {
-    await axios.post(webhookUrl, { content });
-  } catch (error) {
-    console.error('Discord webhook error:', error.message);
+  discordQueue.push({ webhookUrl, content });
+
+  if (discordSending) return;
+  discordSending = true;
+
+  while (discordQueue.length > 0) {
+    const { webhookUrl, content } = discordQueue.shift();
+
+    try {
+      await axios.post(webhookUrl, { content });
+    } catch (error) {
+      console.error(
+        'Discord webhook error:',
+        error.response?.status,
+        error.message
+      );
+    }
+
+    // ⏱️ 429 FIX
+    await new Promise(resolve => setTimeout(resolve, 1200));
   }
+
+  discordSending = false;
 }
 
 // Login endpoint
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body;
   const user = users.find(u => u.username === username && u.password === password);
-  
+
   if (user) {
-    res.json({ 
-      success: true, 
-      user: { 
-        username: user.username
-      } 
+    res.json({
+      success: true,
+      user: { username: user.username }
     });
   } else {
     res.status(401).json({ success: false, message: 'Geçersiz kullanıcı adı veya şifre' });
   }
 });
 
-// Kullanıcıları getir (yönetim için)
+// Kullanıcıları getir
 app.get('/api/users', (req, res) => {
   res.json(users.map(u => ({ username: u.username })));
 });
@@ -73,33 +95,28 @@ app.get('/api/users', (req, res) => {
 // Yeni kullanıcı ekle
 app.post('/api/users', (req, res) => {
   const { username, password } = req.body;
-  
+
   if (users.find(u => u.username === username)) {
     return res.status(400).json({ success: false, message: 'Kullanıcı zaten mevcut' });
   }
-  
+
   users.push({ username, password });
   res.json({ success: true, message: 'Kullanıcı eklendi' });
 });
 
-// Socket.IO bağlantıları
+// Socket.IO
 io.on('connection', (socket) => {
   console.log('Yeni kullanıcı bağlandı:', socket.id);
-  
-  // Kullanıcı bilgilerini kaydet
+
   socket.on('user-connected', (user) => {
     socket.username = user.username;
-    socket.deviceType = user.deviceType; // 'mobile' veya 'dispatch'
-    console.log(`${user.username} bağlandı (${user.deviceType})`);
-    
-    // Mevcut çağrıları gönder
+    socket.deviceType = user.deviceType;
+
     socket.emit('initial-calls', activeCalls);
-    
-    // Mevcut chat mesajlarını gönder
     socket.emit('initial-messages', chatMessages);
   });
-  
-  // Yeni çağrı oluşturma
+
+  // Yeni çağrı
   socket.on('new-call', async (callData) => {
     const newCall = {
       id: callIdCounter++,
@@ -108,26 +125,22 @@ io.on('connection', (socket) => {
       status: 'pending',
       caller: socket.username
     };
-    
+
     activeCalls.push(newCall);
-    
-    // Tüm kullanıcılara gönder
     io.emit('call-created', newCall);
-    
-    // Discord pager'a gönder
-    let discordMessage = `**YENİ ÇAĞRI**\n`;
-    discordMessage += `**Çağrı Sahibi:** ${newCall.caller}\n`;
-    discordMessage += `**Başlık:** ${newCall.title}\n`;
-    discordMessage += `**Detay:** ${newCall.details}\n`;
-    discordMessage += `**Konum:** ${newCall.location}\n`;
-    discordMessage += `**Aciliyet:** ${newCall.priority}\n`;
-    discordMessage += `**Zaman:** ${new Date(newCall.timestamp).toLocaleString('tr-TR')}`;
-    
-    // ACİL çağrı ise @everyone ekle
+
+    let discordMessage =
+      `**YENİ ÇAĞRI**\n` +
+      `**Çağrı Sahibi:** ${newCall.caller}\n` +
+      `**Başlık:** ${newCall.title}\n` +
+      `**Detay:** ${newCall.details}\n` +
+      `**Konum:** ${newCall.location}\n` +
+      `**Aciliyet:** ${newCall.priority}\n` +
+      `**Zaman:** ${new Date(newCall.timestamp).toLocaleString('tr-TR')}`;
+
     if (newCall.priority === 'Acil') {
       discordMessage = `@everyone\n🚨 **ACİL ÇAĞRI** 🚨\n\n${discordMessage}`;
-      
-      // Bot API'ye acil bildirim gönder (tüm kullanıcılara DM)
+
       try {
         await axios.post(`${BOT_API_URL}/api/emergency-alert`, {
           callData: newCall
@@ -136,11 +149,11 @@ io.on('connection', (socket) => {
         console.error('Bot API hatası:', error.message);
       }
     }
-    
+
     await sendToDiscord(DISCORD_WEBHOOKS.pager, discordMessage);
   });
-  
-  // Çağrıyı alındı olarak işaretle
+
+  // Çağrı alındı
   socket.on('mark-call-received', (callId) => {
     const call = activeCalls.find(c => c.id === callId);
     if (call) {
@@ -149,63 +162,62 @@ io.on('connection', (socket) => {
       io.emit('call-updated', call);
     }
   });
-  
+
   // Tüm çağrıları temizle
   socket.on('clear-all-calls', () => {
     activeCalls = [];
     io.emit('calls-cleared');
   });
-  
-  // Chat mesajı gönderme
+
+  // Chat mesajı
   socket.on('send-message', async (message) => {
     const chatMessage = {
       id: Date.now(),
       username: socket.username,
-      deviceType: socket.deviceType, // 'mobile' veya 'dispatch'
-      message: message,
+      deviceType: socket.deviceType,
+      message,
       timestamp: new Date().toISOString()
     };
-    
+
     chatMessages.push(chatMessage);
-    
-    // Tüm kullanıcılara gönder
     io.emit('new-message', chatMessage);
-    
-    // Discord'a gönder
-    const displayName = socket.deviceType === 'dispatch' 
-      ? `${socket.username} (dispatch)` 
-      : socket.username;
-    
-    await sendToDiscord(DISCORD_WEBHOOKS.chat, `**${displayName}:** ${message}`);
+
+    const displayName =
+      socket.deviceType === 'dispatch'
+        ? `${socket.username} (dispatch)`
+        : socket.username;
+
+    await sendToDiscord(
+      DISCORD_WEBHOOKS.chat,
+      `**${displayName}:** ${message}`
+    );
   });
-  
-  // Chat'i temizle
+
+  // Chat temizle
   socket.on('clear-chat', () => {
     chatMessages = [];
     io.emit('chat-cleared');
   });
-  
-  // Bildirim gönder (PC'den)
+
+  // Bildirim gönder
   socket.on('send-notification', async () => {
-    const notificationMessage = `**${socket.username} (dispatch)** bir bildirim gönderdi.`;
+    const notificationMessage =
+      `**${socket.username} (dispatch)** bir bildirim gönderdi.`;
+
     await sendToDiscord(DISCORD_WEBHOOKS.pager, notificationMessage);
-    
-    // Tüm kullanıcılara bildirim gönderildiğini bildir
-    io.emit('notification-sent', { 
+
+    io.emit('notification-sent', {
       sender: socket.username,
       timestamp: new Date().toISOString()
     });
   });
-  
-  // Bağlantı koptuğunda
+
   socket.on('disconnect', () => {
     console.log('Kullanıcı ayrıldı:', socket.username || socket.id);
   });
 });
 
 const PORT = process.env.PORT || 3001;
-
 server.listen(PORT, () => {
   console.log(`OCST Dispatch Backend çalışıyor: ${PORT}`);
-
 });
